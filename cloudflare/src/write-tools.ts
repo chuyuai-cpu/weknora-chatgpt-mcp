@@ -13,6 +13,7 @@ export function permittedWriteKbs(env:ApiEnv):Set<string> {
 }
 export function isWriteReady(env:ApiEnv):boolean {
   return env.MCP_WRITE_ENABLED==="true"
+    && env.MCP_DRAFT_CONTRACT_VERIFIED==="true"
     && typeof env.OWNER_AUTH_SECRET==="string" && env.OWNER_AUTH_SECRET.length>=20
     && typeof env.WEKNORA_WRITE_API_KEY==="string" && env.WEKNORA_WRITE_API_KEY.length>15
     && env.WEKNORA_WRITE_API_KEY!==env.WEKNORA_API_KEY
@@ -45,6 +46,21 @@ export function registerWriteTools(server:McpServer,env:ApiEnv,call:ApiCall):voi
       const result=unwrap(await action());
       const id=knowledgeId(result);
       if(!id) throw new Error("Upstream response has no valid knowledge ID");
+      // Do not trust request status=draft alone. The managed cloud has
+      // been observed returning publish for draft requests. Verify by
+      // reading the actual persisted record before reporting success.
+      const persisted=unwrap(await call(env,"GET",`knowledge/${encodeURIComponent(id)}`));
+      if(!persisted||typeof persisted!=="object") throw new Error("Persisted knowledge cannot be verified");
+      const saved=persisted as Record<string,unknown>;
+      let metadata=saved.metadata;
+      if(typeof metadata==="string"){
+        try{metadata=JSON.parse(metadata);}catch{throw new Error("Persisted manual metadata invalid");}
+      }
+      if(saved.id!==id||saved.knowledge_base_id!==m.kbId||saved.type!=="manual"||
+        !metadata||typeof metadata!=="object"||!("status" in metadata)||
+        (metadata as {status:unknown}).status!=="draft") {
+        throw new Error("Upstream did not preserve draft status; manual reconciliation required");
+      }
       await ledger.state(m,"success","upstream_confirmed",id);
       if(unlock) await ledger.releaseDocumentLock(m);
       return jsonResult({performed:true,operation_id:m.operationId,state:"success",knowledge_id:id});
