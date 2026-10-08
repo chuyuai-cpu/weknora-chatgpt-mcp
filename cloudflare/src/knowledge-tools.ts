@@ -10,6 +10,7 @@ export interface ApiEnv {
   OWNER_AUTH_SECRET?: string;
   MCP_WRITE_ENABLED?: string;
   WRITE_ALLOWED_KB_IDS?: string;
+  WRITE_LEDGER?: D1Database;
 }
 
 function jsonText(value: unknown) {
