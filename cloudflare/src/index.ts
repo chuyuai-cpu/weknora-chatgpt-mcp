@@ -25,6 +25,7 @@ interface Env {
   WEKNORA_WRITE_API_KEY?: string;
   MCP_WRITE_ENABLED?: string;
   WRITE_ALLOWED_KB_IDS?: string;
+  WRITE_LEDGER?: D1Database;
 }
 
 interface AuthProps {
