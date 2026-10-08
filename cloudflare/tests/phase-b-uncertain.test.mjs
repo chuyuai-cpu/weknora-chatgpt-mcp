@@ -19,6 +19,7 @@ function getEnv(ledger) {return {
   WEKNORA_WRITE_API_KEY:"write-mock-credential",
   OWNER_AUTH_SECRET:"long-independent-owner-password-for-tests",
   MCP_WRITE_ENABLED:"true",
+  MCP_DRAFT_CONTRACT_VERIFIED:"true",
   WRITE_ALLOWED_KB_IDS:kb,
   WRITE_LEDGER:ledger.d1,
 };}
@@ -78,5 +79,31 @@ test("ambiguous update retains document lock, disallows alternate content update
     assert.equal(second.isError,true);
     assert.equal(sent,1);
     assert.equal(parsed(await client.callTool({name:"get_write_operation",arguments:{operation_id:ids[1]}})).operation.state,"rejected");
+  });
+});
+
+test("published state after a requested draft is never reported as success",async(t)=>{
+  const db=createTestD1();t.after(db.close);
+  let postCount=0,readCount=0;
+  const old=globalThis.fetch;
+  globalThis.fetch=async(_url,init)=>{
+    if(init.method==="POST"){postCount++;return response({id:doc});}
+    if(init.method==="GET"){
+      readCount++;
+      return response({id:doc,knowledge_base_id:kb,type:"manual",metadata:{status:"publish",version:1}});
+    }
+    throw new Error("Unexpected request");
+  };
+  t.after(()=>globalThis.fetch=old);
+  await connect(getEnv(db),async(client)=>{
+    const args={kb_id:kb,title:"unexpected publish",content:"sandbox example",mode:"execute",confirm:true,operation_id:ids[2]};
+    const result=await client.callTool({name:"create_manual_knowledge",arguments:args});
+    assert.equal(result.isError,true);
+    assert.equal(postCount,1);
+    assert.equal(readCount,1);
+    const logged=parsed(await client.callTool({name:"get_write_operation",arguments:{operation_id:ids[2]}}));
+    assert.equal(logged.operation.state,"uncertain");
+    assert.equal((await client.callTool({name:"create_manual_knowledge",arguments:args})).isError,true);
+    assert.equal(postCount,1);
   });
 });
