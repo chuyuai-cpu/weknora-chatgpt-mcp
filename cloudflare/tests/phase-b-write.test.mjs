@@ -19,6 +19,7 @@ const configured = {
  OWNER_AUTH_SECRET:"independent-owner-secret-long-enough",
  WRITE_ALLOWED_KB_IDS:kb,
  MCP_WRITE_ENABLED:"true",
+ MCP_DRAFT_CONTRACT_VERIFIED:"true",
  WRITE_LEDGER:ledger.d1,
 };
 async function withMcp(env,canWrite,run) {
@@ -55,7 +56,10 @@ test("write preview and execute require separate authorization, explicit confirm
  const originalFetch=globalThis.fetch;
  globalThis.fetch=async (url,init)=>{
   seen.push({url:String(url),method:init.method,key:init.headers["X-API-Key"],body:init.body});
-  return new Response(JSON.stringify({success:true,data:{id:doc}}),{status:200,headers:{"Content-Type":"application/json"}});
+  const data=init.method==="GET"
+    ? {id:doc,knowledge_base_id:kb,type:"manual",metadata:{status:"draft",format:"markdown"}}
+    : {id:doc};
+  return new Response(JSON.stringify({success:true,data}),{status:200,headers:{"Content-Type":"application/json"}});
  };
  t.after(()=>globalThis.fetch=originalFetch);
  await withMcp(configured,true,async c=>{
@@ -74,8 +78,9 @@ test("write preview and execute require separate authorization, explicit confirm
   assert.equal(seen.length,0);
   const done=resultJson(await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:createId}}));
   assert.equal(done.performed,true);
-  assert.equal(seen.length,1);
+  assert.equal(seen.length,2);
   assert.equal(seen[0].method,"POST");
+  assert.equal(seen[1].method,"GET");
   assert.equal(new URL(seen[0].url).pathname,"/api/v1/knowledge-bases/"+kb+"/knowledge/manual");
   assert.equal(seen[0].key,configured.WEKNORA_WRITE_API_KEY);
   assert.equal(JSON.parse(seen[0].body).status,"draft");
@@ -83,7 +88,7 @@ test("write preview and execute require separate authorization, explicit confirm
   assert.equal(replay.isError,true);
   const duplicate=await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:"1b6c1f58-f203-4e55-91da-99d47118af12"}});
   assert.equal(duplicate.isError,true);
-  assert.equal(seen.length,1);
+  assert.equal(seen.length,2);
   const status=resultJson(await c.callTool({name:"get_write_operation",arguments:{operation_id:createId}}));
   assert.equal(status.operation.state,"success");
  });
@@ -125,8 +130,9 @@ test("manual edit denies wrong type/KB/stale update and never writes on preview"
   assert.ok(seen.every(x=>x.method==="GET"));
   const updated=resultJson(await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:"3b6c1f58-f203-4e55-91da-99d47118af14"}}));
   assert.equal(updated.performed,true);
-  const call=seen.at(-1);
+  const call=seen.at(-2);
   assert.equal(call.method,"PUT");
+  assert.equal(seen.at(-1).method,"GET");
   assert.equal(new URL(call.url).pathname,"/api/v1/knowledge/manual/"+doc);
   assert.equal(call.key,configured.WEKNORA_WRITE_API_KEY);
   assert.equal(JSON.parse(call.body).status,"draft");
