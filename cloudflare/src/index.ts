@@ -25,6 +25,7 @@ interface Env {
   OWNER_AUTH_SECRET: string;
   WEKNORA_WRITE_API_KEY?: string;
   MCP_WRITE_ENABLED?: string;
+  MCP_DRAFT_CONTRACT_VERIFIED?: string;
   WRITE_ALLOWED_KB_IDS?: string;
   WRITE_LEDGER?: D1Database;
 }
