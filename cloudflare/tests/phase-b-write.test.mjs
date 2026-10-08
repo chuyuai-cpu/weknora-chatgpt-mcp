@@ -4,11 +4,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "../src/knowledge-tools.ts";
 import { isWriteReady } from "../src/write-tools.ts";
+import { createTestD1 } from "./support/sqlite-d1.mjs";
 
 const kb = "75dd92e0-7d69-4aec-acd7-133d16fac35e";
 const other = "2276692e-802c-468e-b9ed-840c7aff8c1c";
 const doc = "a9c354dc-166e-41a4-8d74-bd1da6b0040f";
 const updatedAt = "2026-10-07T18:00:00Z";
+const ledger = createTestD1();
+const createId = "1b6c1f58-f203-4e55-91da-99d47118af11";
 const configured = {
  WEKNORA_BASE_URL:"https://mock.weknora.invalid/api/v1",
  WEKNORA_API_KEY:"test-read-secret",
@@ -16,6 +19,7 @@ const configured = {
  OWNER_AUTH_SECRET:"independent-owner-secret-long-enough",
  WRITE_ALLOWED_KB_IDS:kb,
  MCP_WRITE_ENABLED:"true",
+ WRITE_LEDGER:ledger.d1,
 };
 async function withMcp(env,canWrite,run) {
  const server=createServer(env,{canWrite});
@@ -56,7 +60,7 @@ test("write preview and execute require separate authorization, explicit confirm
  t.after(()=>globalThis.fetch=originalFetch);
  await withMcp(configured,true,async c=>{
   const names=await toolNames(c);
-  assert.equal(names.length,11);
+  assert.equal(names.length,12);
   assert.ok(names.includes("create_manual_knowledge"));
   const args={kb_id:kb,title:"测试草稿",content:"## Markdown"};
   const preview=resultJson(await c.callTool({name:"create_manual_knowledge",arguments:args}));
@@ -68,23 +72,30 @@ test("write preview and execute require separate authorization, explicit confirm
   const unconfirmed=await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute"}});
   assert.equal(unconfirmed.isError,true);
   assert.equal(seen.length,0);
-  const done=resultJson(await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute",confirm:true}}));
+  const done=resultJson(await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:createId}}));
   assert.equal(done.performed,true);
   assert.equal(seen.length,1);
   assert.equal(seen[0].method,"POST");
   assert.equal(new URL(seen[0].url).pathname,"/api/v1/knowledge-bases/"+kb+"/knowledge/manual");
   assert.equal(seen[0].key,configured.WEKNORA_WRITE_API_KEY);
   assert.equal(JSON.parse(seen[0].body).status,"draft");
+  const replay=await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:createId}});
+  assert.equal(replay.isError,true);
+  const duplicate=await c.callTool({name:"create_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:"1b6c1f58-f203-4e55-91da-99d47118af12"}});
+  assert.equal(duplicate.isError,true);
+  assert.equal(seen.length,1);
+  const status=resultJson(await c.callTool({name:"get_write_operation",arguments:{operation_id:createId}}));
+  assert.equal(status.operation.state,"success");
  });
 });
 
 test("manual edit denies wrong type/KB/stale update and never writes on preview",async(t)=>{
  const seen=[];
  const originalFetch=globalThis.fetch;
- let type="manual",timestamp=updatedAt,targetKb=kb;
+ let type="manual",timestamp=updatedAt,targetKb=kb,manualStatus="draft";
  globalThis.fetch=async (url,init)=>{
   seen.push({url:String(url),method:init.method,key:init.headers["X-API-Key"],body:init.body});
-  const response=init.method==="GET" ? {id:doc,knowledge_base_id:targetKb,type,updated_at:timestamp} : {id:doc,updated_at:"new"};
+  const response=init.method==="GET" ? {id:doc,knowledge_base_id:targetKb,type,updated_at:timestamp,metadata:{format:"markdown",status:manualStatus,version:1}} : {id:doc,updated_at:"new"};
   return new Response(JSON.stringify({success:true,data:response}),{status:200,headers:{"Content-Type":"application/json"}});
  };
  t.after(()=>globalThis.fetch=originalFetch);
@@ -95,20 +106,24 @@ test("manual edit denies wrong type/KB/stale update and never writes on preview"
   assert.equal(seen.length,1);
   assert.equal(seen[0].key,configured.WEKNORA_API_KEY);
   timestamp="stale";
-  let denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:true}});
+  let denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,content:"stale1",mode:"execute",confirm:true,operation_id:"3b6c1f58-f203-4e55-91da-99d47118af11"}});
   assert.equal(denied.isError,true);
   timestamp=updatedAt;
   type="file";
-  denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:true}});
+  denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,content:"wrongtype",mode:"execute",confirm:true,operation_id:"3b6c1f58-f203-4e55-91da-99d47118af12"}});
   assert.equal(denied.isError,true);
   type="manual";targetKb=other;
-  denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:true}});
+  denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,content:"wrongkb",mode:"execute",confirm:true,operation_id:"3b6c1f58-f203-4e55-91da-99d47118af13"}});
   assert.equal(denied.isError,true);
   targetKb=kb;
+  manualStatus="publish";
+  denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"preview"}});
+  assert.equal(denied.isError,true);
+  manualStatus="draft";
   denied=await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:false}});
   assert.equal(denied.isError,true);
   assert.ok(seen.every(x=>x.method==="GET"));
-  const updated=resultJson(await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:true}}));
+  const updated=resultJson(await c.callTool({name:"update_manual_knowledge",arguments:{...args,mode:"execute",confirm:true,operation_id:"3b6c1f58-f203-4e55-91da-99d47118af14"}}));
   assert.equal(updated.performed,true);
   const call=seen.at(-1);
   assert.equal(call.method,"PUT");
