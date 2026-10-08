@@ -23,6 +23,7 @@ test("OAuth denies unrecognized scopes and guarantees read",()=>{
 test("no optional write tools when production lacks dedicated ledger/credential",()=>{
  const config={
    MCP_WRITE_ENABLED:"true",
+   MCP_DRAFT_CONTRACT_VERIFIED:"true",
    OWNER_AUTH_SECRET:"owner-auth-independent-long-string",
    WEKNORA_API_KEY:"readonly-staging-test-string",
    WEKNORA_WRITE_API_KEY:"different-write-staging-test-string",
@@ -30,5 +31,6 @@ test("no optional write tools when production lacks dedicated ledger/credential"
  };
  assert.equal(isWriteReady(config),false);
  assert.equal(isWriteReady({...config,WRITE_LEDGER:{}}),true);
+ assert.equal(isWriteReady({...config,WRITE_LEDGER:{},MCP_DRAFT_CONTRACT_VERIFIED:"false"}),false);
  assert.equal(isWriteReady({...config,WRITE_LEDGER:{},WEKNORA_WRITE_API_KEY:config.WEKNORA_API_KEY}),false);
 });
