@@ -9,6 +9,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createServer } from "./knowledge-tools.js";
 import { failureKey, authIsBlocked, recordAuthFailure, clearAuthFailures } from "./oauth-guards.js";
 import { isWriteReady, WRITE_SCOPE } from "./write-tools.ts";
+import { decideScopes } from "./oauth-scope-policy.ts";
 
 // Compiled per deployment: staging and production have distinct OAuth issuers.
 declare const __MCP_ORIGIN__: string;
@@ -188,9 +189,10 @@ const defaultHandler: ExportedHandler<Env> = {
 
     const writeApproved = isWriteReady(env) && oauthRequest.scope.includes(WRITE_SCOPE)
       && form.get("write_consent") === "yes";
-    const allowed = new Set([READ_SCOPE, "offline_access", ...(writeApproved ? [WRITE_SCOPE] : [])]);
-    const grantedScopes = oauthRequest.scope.filter((scope) => allowed.has(scope));
-    if (!grantedScopes.includes(READ_SCOPE)) grantedScopes.push(READ_SCOPE);
+    const grantedScopes = decideScopes(oauthRequest.scope, {
+      writeReady: isWriteReady(env),
+      writeConsent: writeApproved,
+    });
 
     const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
       request: oauthRequest,
